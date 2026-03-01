@@ -1,0 +1,12 @@
+{
+  "name": "PowerPoint (macOS)",
+  "app": "Microsoft PowerPoint",
+  "shortcuts": {
+    "next":     "right",
+    "prev":     "left",
+    "zoom_in":  "command+equal",
+    "zoom_out": "command+minus",
+    "pointer":  "command+l",
+    "blank":    "b"
+  }
+}

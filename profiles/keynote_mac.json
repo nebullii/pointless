@@ -2,8 +2,10 @@
   "name": "Keynote (macOS)",
   "app": "Keynote",
   "shortcuts": {
-    "next": "RIGHT",
-    "prev": "LEFT",
-    "pointer": "L"
+    "next":     "right",
+    "prev":     "left",
+    "zoom_in":  "command+equal",
+    "zoom_out": "command+minus",
+    "pointer":  "l"
   }
 }

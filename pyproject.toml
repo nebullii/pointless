@@ -4,6 +4,11 @@ version = "0.1.0"
 description = "Hand-gesture control for presentations and meeting apps"
 readme = "README.md"
 requires-python = ">=3.10"
+dependencies = [
+    "opencv-python>=4.8",
+    "mediapipe>=0.10",
+    "pyautogui>=0.9.54",
+]
 
 [tool.pytest.ini_options]
 addopts = "-q"

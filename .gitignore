@@ -1,0 +1,6 @@
+actions/__pycache__/
+app/__pycache__/
+core/__pycache__/
+gestures/__pycache__/
+ui/__pycache__/
+vision/__pycache__/

@@ -1,10 +1,12 @@
 {
   "name": "PowerPoint (Windows)",
-  "app": "powerpoint.exe",
+  "app": "POWERPNT.EXE",
   "shortcuts": {
-    "next": "RIGHT",
-    "prev": "LEFT",
-    "pointer": "CTRL+L",
-    "blank": "B"
+    "next":     "right",
+    "prev":     "left",
+    "zoom_in":  "ctrl+equal",
+    "zoom_out": "ctrl+minus",
+    "pointer":  "ctrl+l",
+    "blank":    "b"
   }
 }
