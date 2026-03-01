@@ -1,0 +1,9 @@
+{
+  "name": "Zoom",
+  "app": "zoom.us",
+  "shortcuts": {
+    "mute": "ALT+A",
+    "video": "ALT+V",
+    "share": "ALT+S"
+  }
+}

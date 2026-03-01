@@ -1,0 +1,9 @@
+{
+  "name": "Google Slides (Web)",
+  "app": "Chrome",
+  "shortcuts": {
+    "next": "RIGHT",
+    "prev": "LEFT",
+    "pointer": "SHIFT+L"
+  }
+}

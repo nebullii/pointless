@@ -1,0 +1,9 @@
+{
+  "name": "Google Meet",
+  "app": "Chrome",
+  "shortcuts": {
+    "mute": "CTRL+D",
+    "video": "CTRL+E",
+    "share": "CTRL+ALT+S"
+  }
+}

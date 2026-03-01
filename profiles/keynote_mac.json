@@ -1,0 +1,9 @@
+{
+  "name": "Keynote (macOS)",
+  "app": "Keynote",
+  "shortcuts": {
+    "next": "RIGHT",
+    "prev": "LEFT",
+    "pointer": "L"
+  }
+}

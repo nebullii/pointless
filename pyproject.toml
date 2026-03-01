@@ -1,0 +1,9 @@
+[project]
+name = "pointless"
+version = "0.1.0"
+description = "Hand-gesture control for presentations and meeting apps"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+addopts = "-q"

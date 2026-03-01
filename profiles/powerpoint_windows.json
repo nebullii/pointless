@@ -1,0 +1,10 @@
+{
+  "name": "PowerPoint (Windows)",
+  "app": "powerpoint.exe",
+  "shortcuts": {
+    "next": "RIGHT",
+    "prev": "LEFT",
+    "pointer": "CTRL+L",
+    "blank": "B"
+  }
+}
