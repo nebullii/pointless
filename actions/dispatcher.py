@@ -7,104 +7,120 @@ import time
 from typing import Literal
 
 try:
-    from pynput import keyboard as _kb
-
-    _ctrl = _kb.Controller()
-    _HAS_PYNPUT = True
-except ImportError:
-    _ctrl = None  # type: ignore[assignment]
-    _HAS_PYNPUT = False
+    from pynput.keyboard import Key, Controller as _KbController, KeyCode
+    _kb = _KbController()
+    _PYNPUT_OK = True
+except Exception:
+    _PYNPUT_OK = False
 
 # Gesture → profile shortcut-key name
-# "fist" is not here — it drives the state machine, not a key event
 _GESTURE_TO_ACTION: dict[str, str] = {
-    "swipe_right": "next",
-    "swipe_left":  "prev",
-    "open_palm":   "pointer",
-    "pinch":       "blank",
+    "next_slide": "next",
+    "prev_slide": "prev",
+    "zoom_in":    "zoom_in",
+    "zoom_out":   "zoom_out",
 }
 
 # ---------------------------------------------------------------------------
-# Key parsing
+# pynput key mapping
 # ---------------------------------------------------------------------------
 
-def _parse_shortcut(shortcut: str) -> tuple[list, object | None]:
-    """Parse "RIGHT", "CTRL+L", "CMD+SHIFT+F5" etc. into (modifiers, key)."""
-    if not _HAS_PYNPUT:
-        return [], None
+_PYNPUT_KEYS: dict[str, Key] = {
+    "RIGHT": Key.right,
+    "LEFT":  Key.left,
+    "UP":    Key.up,
+    "DOWN":  Key.down,
+    "SPACE": Key.space,
+    "ENTER": Key.enter,
+    "ESC":   Key.esc,
+    "TAB":   Key.tab,
+    "F5":    Key.f5,
+    "F6":    Key.f6,
+}
 
-    _SPECIAL: dict[str, object] = {
-        "RIGHT":  _kb.Key.right,
-        "LEFT":   _kb.Key.left,
-        "UP":     _kb.Key.up,
-        "DOWN":   _kb.Key.down,
-        "SPACE":  _kb.Key.space,
-        "ENTER":  _kb.Key.enter,
-        "ESC":    _kb.Key.esc,
-        "TAB":    _kb.Key.tab,
-        "F5":     _kb.Key.f5,
-        "F6":     _kb.Key.f6,
-    }
-    _MODS: dict[str, object] = {
-        "CTRL":  _kb.Key.ctrl,
-        "CMD":   _kb.Key.cmd,
-        "SHIFT": _kb.Key.shift,
-        "ALT":   _kb.Key.alt,
-        "WIN":   _kb.Key.cmd,  # treat WIN as CMD on macOS
-    }
-
-    mods: list = []
-    key = None
-
-    for part in (p.strip().upper() for p in shortcut.split("+")):
-        if part in _MODS:
-            mods.append(_MODS[part])
-        elif part in _SPECIAL:
-            key = _SPECIAL[part]
-        elif len(part) == 1:
-            key = part.lower()
-
-    return mods, key
-
-
-def _send_shortcut(shortcut: str) -> None:
-    """Press a parsed shortcut via pynput, or log if pynput is unavailable."""
-    if not _HAS_PYNPUT:
-        print(f"[dispatch] (no pynput) would send: {shortcut}")
-        return
-
-    mods, key = _parse_shortcut(shortcut)
-    if key is None:
-        return
-
-    for mod in mods:
-        _ctrl.press(mod)
-    _ctrl.press(key)
-    _ctrl.release(key)
-    for mod in reversed(mods):
-        _ctrl.release(mod)
-
+_PYNPUT_MODS: dict[str, Key] = {
+    "CMD":   Key.cmd,
+    "CTRL":  Key.ctrl,
+    "SHIFT": Key.shift,
+    "ALT":   Key.alt,
+    "WIN":   Key.cmd,
+}
 
 # ---------------------------------------------------------------------------
-# Active-window gating (macOS only, cached)
+# AppleScript helper (for native app actions only — no Accessibility needed)
 # ---------------------------------------------------------------------------
 
-def _frontmost_app(timeout: float = 0.05) -> str:
-    """Return the frontmost macOS application name, or '' on failure."""
+def _run_applescript(script: str) -> str | None:
+    """Run an AppleScript snippet. Returns stderr if it failed, else None."""
     try:
         result = subprocess.run(
-            [
-                "osascript", "-e",
-                'tell application "System Events" to get name of '
-                'first application process whose frontmost is true',
-            ],
+            ["osascript", "-e", script],
             capture_output=True,
             text=True,
-            timeout=timeout,
         )
-        return result.stdout.strip()
+        if result.returncode != 0:
+            return result.stderr.strip()
+        return None
+    except Exception as exc:
+        return str(exc)
+
+
+def _send_applescript_action(script: str) -> None:
+    """Execute a native AppleScript action from the profile."""
+    err = _run_applescript(script)
+    if err:
+        if "-1728" in err:
+            print("[dispatcher] ERROR: PowerPoint slideshow not running — press F5 in PowerPoint first.")
+        else:
+            print(f"[dispatcher] AppleScript error: {err}")
+
+
+# ---------------------------------------------------------------------------
+# pynput keystroke sender (Zesture-style global input simulation)
+# ---------------------------------------------------------------------------
+
+def _send_pynput(shortcut: str) -> bool:
+    """Send a keystroke via pynput. Returns False if pynput unavailable."""
+    if not _PYNPUT_OK:
+        return False
+
+    parts = [p.strip().upper() for p in shortcut.split("+")]
+    mods = [_PYNPUT_MODS[p] for p in parts if p in _PYNPUT_MODS]
+    key_str = next((p for p in parts if p not in _PYNPUT_MODS), None)
+    if key_str is None:
+        return False
+
+    key = _PYNPUT_KEYS.get(key_str) or KeyCode.from_char(key_str.lower())
+
+    try:
+        for mod in mods:
+            _kb.press(mod)
+        _kb.press(key)
+        _kb.release(key)
+        for mod in reversed(mods):
+            _kb.release(mod)
+        return True
+    except Exception as exc:
+        print(f"[dispatcher] pynput error: {exc}")
+        print("[dispatcher] Hint: grant Accessibility permission to Terminal in")
+        print("             System Settings → Privacy & Security → Accessibility")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Active-app gating (macOS only, cached)
+# ---------------------------------------------------------------------------
+
+def _app_is_running(app_name: str, timeout: float = 0.3) -> bool:
+    script = f'tell application "System Events" to (name of processes) contains "{app_name}"'
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", script],
+            capture_output=True, text=True, timeout=timeout,
+        )
+        return "true" in result.stdout.strip().lower()
     except Exception:
-        return ""
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -114,44 +130,38 @@ def _frontmost_app(timeout: float = 0.05) -> str:
 class Dispatcher:
     """Translates confirmed gestures into key presses.
 
-    States:
-        active — gestures map to key events (default)
-        paused — fist toggled; other gestures are suppressed
+    Profile keys:
+        app                  — target application name (for gating)
+        applescript_actions  — action → raw AppleScript (no Accessibility needed)
+        shortcuts            — action → shortcut string (uses pynput, needs Accessibility)
     """
 
-    _WINDOW_POLL_INTERVAL = 1.0  # seconds between active-app checks
+    _WINDOW_POLL_INTERVAL = 2.0
 
     def __init__(self, profile: dict, gate_window: bool = True) -> None:
         self._shortcuts: dict[str, str] = profile.get("shortcuts", {})
+        self._applescript_actions: dict[str, str] = profile.get("applescript_actions", {})
         self._app_name: str = profile.get("app", "")
         self._gate = gate_window
         self._state: Literal["active", "paused"] = "active"
         self._last_poll = 0.0
-        self._window_ok = True  # optimistic until first poll
+        self._window_ok = True
 
     @property
     def state(self) -> Literal["active", "paused"]:
         return self._state
 
-    def _target_focused(self) -> bool:
-        """Return True when the target app is the frontmost window."""
+    def _target_running(self) -> bool:
         if not self._gate or not self._app_name:
             return True
         now = time.monotonic()
         if now - self._last_poll >= self._WINDOW_POLL_INTERVAL:
-            active = _frontmost_app()
-            self._window_ok = self._app_name.lower() in active.lower()
+            self._window_ok = _app_is_running(self._app_name)
             self._last_poll = now
         return self._window_ok
 
     def dispatch(self, gesture: str) -> str | None:
-        """Process a confirmed gesture.
-
-        Returns the action name that was fired, or None.
-
-        Fist always toggles the paused/active state (no key sent).
-        All other gestures require the target app to be focused.
-        """
+        """Process a confirmed gesture. Returns the action name fired, or None."""
         if gesture == "fist":
             self._state = "paused" if self._state == "active" else "active"
             print(f"[dispatcher] state → {self._state}")
@@ -160,17 +170,26 @@ class Dispatcher:
         if self._state == "paused":
             return None
 
-        if not self._target_focused():
+        if not self._target_running():
             return None
 
         action = _GESTURE_TO_ACTION.get(gesture)
         if action is None:
             return None
 
-        shortcut = self._shortcuts.get(action)
-        if shortcut is None:
-            return None
+        # 1. Native AppleScript (no Accessibility permission needed)
+        script = self._applescript_actions.get(action)
+        if script:
+            _send_applescript_action(script)
+            print(f"[dispatcher] {gesture} → {action} (native AppleScript)")
+            return action
 
-        _send_shortcut(shortcut)
-        print(f"[dispatcher] {gesture} → {action} → {shortcut}")
-        return action
+        # 2. pynput global keystroke (Accessibility permission needed)
+        shortcut = self._shortcuts.get(action)
+        if shortcut:
+            ok = _send_pynput(shortcut)
+            if ok:
+                print(f"[dispatcher] {gesture} → {action} → {shortcut} (pynput)")
+            return action
+
+        return None

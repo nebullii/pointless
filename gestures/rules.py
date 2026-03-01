@@ -1,110 +1,143 @@
-"""Rule-based gesture classifier."""
+"""Rule-based gesture classifier.
+
+Supported gestures
+------------------
+next_slide  — wrist moves right with all 5 fingers extended
+prev_slide  — wrist moves left  with all 5 fingers extended
+zoom_in     — thumb-index distance increases (pinch open)
+zoom_out    — thumb-index distance decreases (pinch close)
+fist        — all 4 non-thumb fingers curled
+"""
 
 from __future__ import annotations
 
 import math
+from collections import deque
+from typing import Optional, Tuple
 
-# MediaPipe hand landmark indices
-_WRIST = 0
-_THUMB_TIP = 4
-_INDEX_MCP = 5
-_INDEX_PIP = 6
-_INDEX_TIP = 8
-_MIDDLE_PIP = 10
-_MIDDLE_TIP = 12
-_RING_PIP = 14
-_RING_TIP = 16
-_PINKY_PIP = 18
-_PINKY_TIP = 20
+# ---------------------------------------------------------------------------
+# Tuning constants
+# ---------------------------------------------------------------------------
+WAVE_WINDOW     = 10    # frames used for swipe detection
+WAVE_THRESHOLD  = 0.10  # normalised x-displacement to trigger a swipe
+WAVE_CONF_SCALE = 0.22  # x-displacement that maps to 100 % confidence
 
-# (tip_idx, pip_idx) pairs for the four non-thumb fingers
+PINCH_WINDOW     = 10
+PINCH_THRESHOLD  = 0.05
+PINCH_CONF_SCALE = 0.12
+
+# Minimum fingers that must be extended for a swipe to be valid
+MIN_EXTENDED_FOR_SWIPE = 4   # out of 5 (thumb extension is unreliable sideways)
+
+# ---------------------------------------------------------------------------
+# MediaPipe landmark indices
+# ---------------------------------------------------------------------------
+WRIST     = 0
+THUMB_TIP = 4
+THUMB_MCP = 2
+INDEX_TIP = 8
+
+# Non-thumb fingers: (tip_index, pip_index, mcp_index)
 _FINGERS = [
-    (_INDEX_TIP, _INDEX_PIP),
-    (_MIDDLE_TIP, _MIDDLE_PIP),
-    (_RING_TIP, _RING_PIP),
-    (_PINKY_TIP, _PINKY_PIP),
+    (8,  6,  5),   # index
+    (12, 10, 9),   # middle
+    (16, 14, 13),  # ring
+    (20, 18, 17),  # pinky
 ]
 
 
-def _xy(landmarks, idx: int) -> tuple[float, float]:
-    lm = landmarks.landmark[idx]
-    return lm.x, lm.y
+def _dist(p1, p2) -> float:
+    return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
 
 
-def _dist(a: tuple[float, float], b: tuple[float, float]) -> float:
-    return math.hypot(a[0] - b[0], a[1] - b[1])
+# Tip must be this many times farther than MCP to count as "extended" (strict — for swipe gate)
+_EXTENDED_THRESH = 1.8
+# Tip must be within this multiple of MCP distance to count as "curled" (lenient — for fist)
+_FIST_THRESH = 1.5
 
 
-def extract_features(landmarks) -> dict:
-    """Extract scalar features from a single frame's hand landmarks.
+def _extended_count(landmarks: list) -> int:
+    """Count how many of the 5 fingers are clearly extended.
 
-    All distances are normalized by hand scale (wrist → index MCP),
-    so they are robust to the hand being close or far from the camera.
+    Orientation-invariant: uses wrist→tip vs wrist→MCP distance ratio.
+    Uses a strict threshold so only clearly open hands qualify for swipe.
     """
-    fingers_up = sum(
-        1
-        for tip, pip in _FINGERS
-        if landmarks.landmark[tip].y < landmarks.landmark[pip].y
-    )
+    wrist = landmarks[WRIST]
+    count = 0
+    for tip, _, mcp in _FINGERS:
+        if _dist(landmarks[tip], wrist) > _dist(landmarks[mcp], wrist) * _EXTENDED_THRESH:
+            count += 1
+    if _dist(landmarks[THUMB_TIP], wrist) > _dist(landmarks[THUMB_MCP], wrist) * _EXTENDED_THRESH:
+        count += 1
+    return count
 
-    wrist = _xy(landmarks, _WRIST)
-    index_mcp = _xy(landmarks, _INDEX_MCP)
-    hand_scale = _dist(wrist, index_mcp) or 1e-6
 
-    thumb_tip = _xy(landmarks, _THUMB_TIP)
-    index_tip = _xy(landmarks, _INDEX_TIP)
-    pinch_dist_norm = _dist(thumb_tip, index_tip) / hand_scale
+def _is_fist(landmarks: list) -> bool:
+    """Return True when all 4 non-thumb fingers are curled.
 
-    return {
-        "fingers_up": fingers_up,
-        "pinch_dist_norm": pinch_dist_norm,
-        "wrist_x": wrist[0],
-        "wrist_y": wrist[1],
-        "hand_scale": hand_scale,
-    }
+    Uses a lenient threshold so closing the hand reliably triggers fist detection.
+    """
+    wrist = landmarks[WRIST]
+    for tip, _, mcp in _FINGERS:
+        if _dist(landmarks[tip], wrist) > _dist(landmarks[mcp], wrist) * _FIST_THRESH:
+            return False
+    return True
 
 
 def classify(
-    landmarks,
-    pos_history: list[tuple[float, float]],
-) -> tuple[str | None, float]:
-    """Classify a gesture from the current frame and recent wrist-position history.
+    landmarks: list,
+    history: deque,
+) -> Tuple[Optional[str], float]:
+    """Classify a gesture from current *landmarks* and running *history*.
 
-    Args:
-        landmarks: MediaPipe hand landmarks for one hand.
-        pos_history: List of (wrist_x, wrist_y) tuples, newest last.
-
-    Returns:
-        (gesture_name, confidence) or (None, 0.0).
+    Returns ``(gesture_name, confidence)`` or ``(None, 0.0)``.
     """
-    f = extract_features(landmarks)
+    if not landmarks:
+        return None, 0.0
 
-    # --- Static gestures ---
+    wrist = landmarks[WRIST]
+    pinch_dist = _dist(landmarks[THUMB_TIP], landmarks[INDEX_TIP])
 
-    # Pinch checked first: thumb+index close overrides fist (both have fingers_up == 0)
-    if f["pinch_dist_norm"] < 0.5 and f["fingers_up"] <= 1:
-        return "pinch", 0.85
+    history.append({"wrist_x": wrist[0], "pinch_dist": pinch_dist})
 
-    # Fist: no fingers extended (and not a pinch)
-    if f["fingers_up"] == 0:
-        return "fist", 0.9
+    # ------------------------------------------------------------------
+    # Fist — detected immediately, no history needed
+    # ------------------------------------------------------------------
+    if _is_fist(landmarks):
+        return "fist", 1.0
 
-    # Open palm: all four fingers extended
-    if f["fingers_up"] == 4:
-        return "open_palm", 0.9
+    if len(history) < WAVE_WINDOW:
+        return None, 0.0
 
-    # --- Dynamic gestures: swipe (needs position history) ---
-    if len(pos_history) >= 8:
-        recent = pos_history[-8:]
-        dx = recent[-1][0] - recent[0][0]
-        dy = recent[-1][1] - recent[0][1]
+    frames = list(history)
 
-        # Movement must be predominantly horizontal
-        if abs(dx) > abs(dy) * 1.5:
-            norm_dx = dx / f["hand_scale"]
-            if norm_dx > 2.0:
-                return "swipe_right", min(abs(norm_dx) / 4.0, 1.0)
-            if norm_dx < -2.0:
-                return "swipe_left", min(abs(norm_dx) / 4.0, 1.0)
+    # ------------------------------------------------------------------
+    # Swipe — only valid with 5 fingers extended
+    # ------------------------------------------------------------------
+    if _extended_count(landmarks) >= MIN_EXTENDED_FOR_SWIPE:
+        wave_frames = frames[-WAVE_WINDOW:]
+        x_delta = wave_frames[-1]["wrist_x"] - wave_frames[0]["wrist_x"]
+
+        if x_delta > WAVE_THRESHOLD:
+            conf = min(1.0, abs(x_delta) / WAVE_CONF_SCALE)
+            return "next_slide", conf
+
+        if x_delta < -WAVE_THRESHOLD:
+            conf = min(1.0, abs(x_delta) / WAVE_CONF_SCALE)
+            return "prev_slide", conf
+
+    # ------------------------------------------------------------------
+    # Pinch zoom
+    # ------------------------------------------------------------------
+    pinch_frames = frames[-PINCH_WINDOW:]
+    d_delta = pinch_frames[-1]["pinch_dist"] - pinch_frames[0]["pinch_dist"]
+
+    if d_delta > PINCH_THRESHOLD:
+        conf = min(1.0, abs(d_delta) / PINCH_CONF_SCALE)
+        return "zoom_in", conf
+
+    if d_delta < -PINCH_THRESHOLD:
+        conf = min(1.0, abs(d_delta) / PINCH_CONF_SCALE)
+        return "zoom_out", conf
 
     return None, 0.0

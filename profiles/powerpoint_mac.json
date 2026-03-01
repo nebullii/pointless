@@ -1,10 +1,12 @@
 {
   "name": "PowerPoint (macOS)",
   "app": "Microsoft PowerPoint",
+  "applescript_actions": {
+    "next": "tell application \"Microsoft PowerPoint\" to go to next slide slide show view of slide show window 1",
+    "prev": "tell application \"Microsoft PowerPoint\" to go to previous slide slide show view of slide show window 1"
+  },
   "shortcuts": {
-    "next":    "RIGHT",
-    "prev":    "LEFT",
-    "pointer": "CMD+SHIFT+L",
-    "blank":   "B"
+    "zoom_in": "CMD+SHIFT+EQUAL",
+    "zoom_out": "CMD+SHIFT+MINUS"
   }
 }

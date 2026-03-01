@@ -1,47 +1,19 @@
-"""Tests for Dispatcher state machine and shortcut parsing."""
+"""Tests for Dispatcher."""
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
-
-from actions.dispatcher import Dispatcher, _parse_shortcut
-
-# ---------------------------------------------------------------------------
-# _parse_shortcut
-# ---------------------------------------------------------------------------
-
-def test_parse_arrow():
-    from pynput import keyboard as kb
-    mods, key = _parse_shortcut("RIGHT")
-    assert mods == [] and key == kb.Key.right
-
-
-def test_parse_modifier_combo():
-    from pynput import keyboard as kb
-    mods, key = _parse_shortcut("CMD+SHIFT+L")
-    assert kb.Key.cmd in mods and kb.Key.shift in mods
-    assert key == "l"
-
-
-def test_parse_unknown_returns_none_key():
-    mods, key = _parse_shortcut("UNKNOWN_KEY")
-    assert key is None
-
-
-# ---------------------------------------------------------------------------
-# Dispatcher state machine
-# ---------------------------------------------------------------------------
+from actions.dispatcher import Dispatcher
 
 _PROFILE = {
     "name": "Test",
     "app": "",
     "shortcuts": {
-        "next":    "RIGHT",
-        "prev":    "LEFT",
-        "pointer": "SHIFT+L",
-        "blank":   "B",
+        "next":     "RIGHT",
+        "prev":     "LEFT",
+        "zoom_in":  "CMD+EQUAL",
+        "zoom_out": "CMD+MINUS",
     },
 }
 
@@ -49,6 +21,10 @@ _PROFILE = {
 def _make_dispatcher(**kwargs) -> Dispatcher:
     return Dispatcher(_PROFILE, gate_window=False, **kwargs)
 
+
+# ---------------------------------------------------------------------------
+# State machine
+# ---------------------------------------------------------------------------
 
 def test_initial_state_is_active():
     d = _make_dispatcher()
@@ -72,40 +48,44 @@ def test_fist_toggles_back_to_active():
 def test_gestures_suppressed_when_paused():
     d = _make_dispatcher()
     d.dispatch("fist")  # → paused
-    result = d.dispatch("swipe_right")
+    result = d.dispatch("next_slide")
     assert result is None
 
 
-@patch("actions.dispatcher._send_shortcut")
-def test_swipe_right_sends_next(mock_send):
+# ---------------------------------------------------------------------------
+# Shortcut dispatch
+# ---------------------------------------------------------------------------
+
+@patch("actions.dispatcher._send_pynput", return_value=True)
+def test_next_slide_sends_right(mock_send):
     d = _make_dispatcher()
-    action = d.dispatch("swipe_right")
+    action = d.dispatch("next_slide")
     assert action == "next"
     mock_send.assert_called_once_with("RIGHT")
 
 
-@patch("actions.dispatcher._send_shortcut")
-def test_swipe_left_sends_prev(mock_send):
+@patch("actions.dispatcher._send_pynput", return_value=True)
+def test_prev_slide_sends_left(mock_send):
     d = _make_dispatcher()
-    action = d.dispatch("swipe_left")
+    action = d.dispatch("prev_slide")
     assert action == "prev"
     mock_send.assert_called_once_with("LEFT")
 
 
-@patch("actions.dispatcher._send_shortcut")
-def test_open_palm_sends_pointer(mock_send):
+@patch("actions.dispatcher._send_pynput", return_value=True)
+def test_zoom_in_sends_shortcut(mock_send):
     d = _make_dispatcher()
-    action = d.dispatch("open_palm")
-    assert action == "pointer"
-    mock_send.assert_called_once_with("SHIFT+L")
+    action = d.dispatch("zoom_in")
+    assert action == "zoom_in"
+    mock_send.assert_called_once_with("CMD+EQUAL")
 
 
-@patch("actions.dispatcher._send_shortcut")
-def test_pinch_sends_blank(mock_send):
+@patch("actions.dispatcher._send_pynput", return_value=True)
+def test_zoom_out_sends_shortcut(mock_send):
     d = _make_dispatcher()
-    action = d.dispatch("pinch")
-    assert action == "blank"
-    mock_send.assert_called_once_with("B")
+    action = d.dispatch("zoom_out")
+    assert action == "zoom_out"
+    mock_send.assert_called_once_with("CMD+MINUS")
 
 
 def test_unknown_gesture_returns_none():
@@ -114,21 +94,21 @@ def test_unknown_gesture_returns_none():
 
 
 # ---------------------------------------------------------------------------
-# Active-window gating
+# Active-app gating
 # ---------------------------------------------------------------------------
 
-def test_window_gate_blocks_when_wrong_app():
+def test_gate_blocks_when_app_not_running():
     profile = {**_PROFILE, "app": "Microsoft PowerPoint"}
     d = Dispatcher(profile, gate_window=True)
-    with patch("actions.dispatcher._frontmost_app", return_value="Google Chrome"):
-        result = d.dispatch("swipe_right")
+    with patch("actions.dispatcher._app_is_running", return_value=False):
+        result = d.dispatch("next_slide")
     assert result is None
 
 
-@patch("actions.dispatcher._send_shortcut")
-def test_window_gate_allows_when_correct_app(mock_send):
+@patch("actions.dispatcher._send_pynput", return_value=True)
+def test_gate_allows_when_app_running(mock_send):
     profile = {**_PROFILE, "app": "Microsoft PowerPoint"}
     d = Dispatcher(profile, gate_window=True)
-    with patch("actions.dispatcher._frontmost_app", return_value="Microsoft PowerPoint"):
-        result = d.dispatch("swipe_right")
+    with patch("actions.dispatcher._app_is_running", return_value=True):
+        result = d.dispatch("next_slide")
     assert result == "next"
