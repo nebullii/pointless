@@ -4,6 +4,6 @@
   "shortcuts": {
     "next": "RIGHT",
     "prev": "LEFT",
-    "pointer": "L"
+    "blank": "B"
   }
 }

@@ -1,0 +1,4 @@
+mediapipe
+opencv-python
+numpy<2
+pynput

@@ -1,0 +1,10 @@
+{
+  "name": "PowerPoint (macOS)",
+  "app": "Microsoft PowerPoint",
+  "shortcuts": {
+    "next":    "RIGHT",
+    "prev":    "LEFT",
+    "pointer": "CMD+SHIFT+L",
+    "blank":   "B"
+  }
+}
